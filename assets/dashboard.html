@@ -298,7 +298,7 @@ const STAGES = [
   { key: 'review', label: 'Review', who: 'sec · ux · ui · code' },
   { key: 'approve', label: 'Approve', who: 'approver · opus' },
   { key: 'merged', label: 'Done', who: 'merged · rejected', cls: 'merged-col' },
-  { key: 'needs-human', label: 'Needs human', who: 'test · approve · rework', cls: 'human' },
+  { key: 'needs-human', label: 'Needs you', who: 'test · approve', cls: 'human' },
 ]
 const LIVE = new Set(['spec', 'build', 'review', 'approve'])
 const REVIEWERS = [['security', 'sec'], ['ux', 'ux'], ['ui', 'ui'], ['code', 'code']]
@@ -441,7 +441,7 @@ function chips(n, verdicts, waiting) {
 }
 
 function card(job, past) {
-  const live = LIVE.has(job.stage)
+  const live = LIVE.has(job.stage) && !/^(queued|waiting)/.test(job.note || '')
   const human = job.stage === 'needs-human'
   const rejected = job.stage === 'rejected'
   const done = job.stage === 'merged' || rejected
@@ -607,6 +607,7 @@ async function openDrawer(id) {
   openJobId = id
   openPath = null
   openText = undefined
+  history.replaceState(null, '', `#${id}`)
   document.body.classList.add('open')
   try {
     await refreshDrawer()
@@ -617,6 +618,7 @@ async function openDrawer(id) {
 
 function closeDrawer() {
   openJobId = null
+  history.replaceState(null, '', location.pathname)
   document.body.classList.remove('open')
 }
 
@@ -711,7 +713,15 @@ function markdown(src) {
   return html
 }
 
-poll()
+// Deep links: dashboard.html#<job-id> or #<job-id>/<file> (e.g. #004-csv-export/__agents)
+async function openFromHash() {
+  const [id, ...rest] = decodeURIComponent(location.hash.slice(1)).split('/')
+  if (!id || !jobs.some((j) => j.id === id)) return
+  await openDrawer(id)
+  if (rest.length) { openPath = rest.join('/'); openText = undefined; await refreshDrawer() }
+}
+
+poll().then(openFromHash)
 setInterval(poll, POLL_MS)
 </script>
 </body>
