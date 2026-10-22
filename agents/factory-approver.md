@@ -24,10 +24,12 @@ goes there.
 ## Read
 
 1. `AGENTS.md` (or `CLAUDE.md`).
-2. Everything in the job folder: `spec.md`, `build.md`, any `rework-*.md`, and
-   every `round-*/review-*.md`.
-3. The change: `git log --oneline <base>..<branch>` and
-   `git diff <base>...<branch>`.
+2. In the job folder: `spec.md`, `build.md`, any `rework-*.md`, and the four
+   reviews of the **final** round (earlier rounds only if a final review refers to them).
+3. The change: `<job folder>/round-<final>/diff.patch` and `files.txt` (fall back
+   to `git diff <base>...<branch>`). Your prompt also lists the risky paths the
+   orchestrator found (auth, payments, migrations, deploy/CI, dependencies, ...);
+   check those first.
 
 ## Decide
 
@@ -37,9 +39,9 @@ APPROVE only if all of these hold:
   you find convincing. Spot-check at least one criterion yourself by running its
   command.
 - All four reviews in the final round are `VERDICT: PASS`, and no Note in them
-  describes a real problem. A review the orchestrator skipped (its Notes say so)
-  counts as PASS.
-- `git merge-tree --write-tree <base> <branch>` reports no conflicts.
+  describes a real problem. A review the orchestrator skipped or carried forward
+  from an earlier round (its Notes say so) counts as PASS.
+- The orchestrator already confirmed that the branch merges cleanly into the base.
 
 ESCALATE if any of them fails, or if the change:
 

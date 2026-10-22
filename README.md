@@ -10,10 +10,12 @@ hands it to you to test. **Nothing reaches your main branch until you approve it
 
 ```
 feature → spec-writer → builder → [security, ux, ui, code] → approver → you test → merge
-             opus         opus      opus  sonnet sonnet sonnet   opus
                            ▲                    │
                            └── any CHANGES ─────┘  (fix and re-review, max 2 times)
 ```
+
+Each agent's model and effort are picked per job from its **size** (S/M/L) and **risk**,
+so a copy tweak runs on Sonnet at low effort while an auth change gets Opus at high effort.
 
 ## Contents
 
@@ -34,7 +36,7 @@ feature → spec-writer → builder → [security, ux, ui, code] → approver �
 | 1 | **spec-writer** | Reads your code and turns your one-line request into requirements and testable acceptance criteria | `spec.md` |
 | 2 | **builder** | Implements the spec on its own branch, in its own worktree, runs your tests, commits | `build.md` + commits |
 | 3 | **4 reviewers** (in parallel) | security, UX, UI design and code quality each answer `PASS` or `CHANGES` | `round-N/review-*.md` |
-| 4 | *fix loop* | Any `CHANGES` → the builder fixes them and all reviewers check again (at most 2 extra rounds) | |
+| 4 | *fix loop* | Any `CHANGES` → a builder fixes exactly those findings; only the reviewers that asked for changes (plus code, and any lens whose files changed) check again. At most 2 extra rounds | |
 | 5 | **approver** | Checks every acceptance criterion and the risk. `APPROVE` = ready for you to test; `ESCALATE` = needs your decision | `decision.md` |
 | 6 | **you** | Test it, then approve, send it back, or reject it | |
 
@@ -346,7 +348,22 @@ Link straight to a job with `dashboard.html#<job-id>` or `#<job-id>/__agents`.
 
 ## Saving cost
 
-Each job runs 6 to 15 agents, so:
+The factory already does a lot for you:
+
+- **Model and effort per job:** the spec-writer rates each job's size and risk, and every
+  agent gets the cheapest model and effort that fits (see the table in [`TODO.md`](TODO.md)).
+  A builder that needs a second try gets one step more effort.
+- **Re-review only what changed:** reviewers that passed and whose area wasn't touched
+  carry their PASS forward instead of running again.
+- **A lean orchestrator:** the `/factory` session does its bookkeeping through
+  `scripts/factory.js` and never reads agent output in full. It starts on Sonnet, but
+  later steps run on your session's model, so **switch with `/model sonnet` before
+  `/factory`** for the cheapest runs.
+- **Quota guard and budget:** no new jobs when less than 15% of your 5-hour quota is left,
+  and a job that goes over its token budget stops and asks you instead of looping.
+- **The diff is computed once per round** and shared by all reviewers.
+
+Each job still runs several agents, so:
 
 - **One feature per job, small and specific.** "Add CSV export to the reports page" works;
   "improve the reports" doesn't.
@@ -356,15 +373,17 @@ Each job runs 6 to 15 agents, so:
 - **Watch the dashboard's tokens** to see which jobs and roles cost the most.
 - Start with one job before running three in parallel.
 
-Planned improvements (size/risk-based model and effort routing, re-reviewing only
-what changed, a quota guard, a slimmer orchestrator) are tracked in [`TODO.md`](TODO.md).
+Improvements and what's left to measure are tracked in [`TODO.md`](TODO.md).
 
 ## Files
 
 ```
-SKILL.md                 the orchestrator (/factory)
+SKILL.md                 the orchestrator (/factory): the core loop
+reference/*.md           the rarer commands, loaded only when used
 agents/factory-*.md      the seven agents (install into ~/.claude/agents/)
 assets/dashboard.html    the board, copied into each project's .factory/
+scripts/factory.js       bookkeeping helper (jobs, worktrees, rounds, routing, quota, cost)
+scripts/lib/usage.js     token counting from Claude Code's transcripts
 scripts/serve.js         dashboard server with quota and token APIs
 scripts/statusline.js    status line that records plan quota (can chain an existing one)
 docs/                    screenshots

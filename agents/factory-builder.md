@@ -24,12 +24,12 @@ other jobs running in parallel.
 1. `AGENTS.md` (or `CLAUDE.md`): the canonical repo instructions. Follow them.
 2. `<job folder>/spec.md`: what to build. The acceptance criteria are your test
    plan, and its `## Commands` section lists the repo's commands.
-3. When resumed after a review round: every `review-*.md` in the round folder
-   the message names. Address each finding in a `VERDICT: CHANGES` file. Notes in
-   `VERDICT: PASS` files are optional.
-4. When started for a rework, or started fresh to replace a lost builder: the
-   `rework-*.md` file the prompt names, the existing `build.md`, and every round
-   folder, so you know the history.
+3. **Fix round** (the prompt lists review files): read `build.md` and only the
+   listed reviews. Address every finding in them. Open only the files those
+   findings point to and the files you need to change; don't re-explore the repo.
+4. **Rework or continue** (the prompt names `rework-*.md`, or says the previous
+   builder was interrupted): read that file, `build.md`, and the latest round
+   folder, so you know where things stand.
 
 ## Build
 

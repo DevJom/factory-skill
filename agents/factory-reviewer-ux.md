@@ -23,7 +23,8 @@ goes there.
 1. `AGENTS.md` (or `CLAUDE.md`), plus any doc it says to read for the area the
    branch touches.
 2. `<job folder>/spec.md` and `<job folder>/build.md`.
-3. The change: `git log --oneline <base>..<branch>` and `git diff <base>...<branch>`.
+3. The change: `<job folder>/round-<N>/diff.patch` and `files.txt`, written once for
+   all reviewers (fall back to `git diff <base>...<branch>` if they are missing).
 4. From round 2 on, your own `round-<N-1>/review-ux.md`. Check whether each
    finding was fixed.
 

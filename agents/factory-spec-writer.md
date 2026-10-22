@@ -35,6 +35,8 @@ the main checkout; your one file goes there.
 > Feature: <the request, verbatim>
 
 Surface: ui | none
+Size: S | M | L
+Risk: low | high
 
 ## Context
 Where this lives in the codebase: the files, components and data involved, and
@@ -68,6 +70,20 @@ The approver escalates to a human when one of these is a product decision.
 `Surface:` is `ui` when anything a person sees changes (pages, components,
 styles, copy, emails, CLI output) and `none` for purely internal changes. When
 unsure, write `ui`.
+
+`Size:` and `Risk:` decide which models and effort the other agents get, so judge
+them honestly:
+
+| Size | Files likely touched | Kind of change | Acceptance criteria |
+|---|---|---|---|
+| S | 1-2 | copy, style, config value, one small component | up to 4 |
+| M | 3-6 | a new component or endpoint, logic in one area | 5-9 |
+| L | 7+ | cross-cutting, data model, a new subsystem | 10+ |
+
+Pick the larger size when signals disagree. `Risk: high` if the change touches
+authentication, permissions, payments, user input reaching SQL, shell or HTML,
+file uploads, secrets, database migrations, deploy/CI config, new dependencies,
+or sending email. Otherwise `low`.
 
 ## Rules
 

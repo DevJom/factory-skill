@@ -30,52 +30,61 @@ Re-measure after each change below with the dashboard (agents & tokens) and comp
 
 ## P1: biggest savings
 
-- [ ] **Slim the orchestrator.**
-  - Split SKILL.md: keep only the core loop in it (~150 lines), and move hello/bye, test,
-    rework/reject, resume, dashboard and the Orca details into `reference/*.md`, read only
-    when that command runs.
-  - Never read full agent output into the orchestrator. Read only first lines (verdicts,
-    STATUS, decision) with `head -1`; the dashboard and the human read the full files.
-  - Keep status lines to one short line; don't quote files back unless asked.
-  - Recommend running the orchestrator on Sonnet (`/model sonnet` before `/factory`). Its work
-    is mechanical: spawn, read first lines, update job.json. Test whether quality holds.
-  - Consider a small `scripts/job.js` helper (create job, set stage, record verdict, merge-tree
-    check) so the orchestrator makes one Bash call instead of several reads and writes.
-- [ ] **Re-review only what's needed.** In round N+1, re-run the reviewers that said CHANGES
-  plus the code reviewer (the code changed). Carry PASS verdicts forward for untouched lenses,
-  unless the fix touched files in their area (UI files → UI/UX; auth/input → security).
-- [ ] **Size and risk routing (see table below).** The spec-writer adds `Size:` and `Risk:`
-  lines. The orchestrator passes `model` and `effort` on each Agent call from the routing table.
-- [ ] **Quota guard.** Read `~/.claude/factory/quota.json` before spawning. If 5h left < 15%,
-  don't start new jobs (finish running ones), say when the window resets, and let
-  `/factory hello` suggest waiting.
+- [x] **Slim the orchestrator.** (2026-10-22)
+  - SKILL.md 31.6 KB → 8.2 KB; test/approve/rework/reject, parallel, resume, hello/bye and
+    dashboard moved to `reference/*.md`, read only when that command runs.
+  - `scripts/factory.js` does all bookkeeping (setup, new, worktree, set, agent, overlap,
+    route, round, verdicts, build, decision, conflict, cost, quota, claim, status) and prints
+    one line of JSON; it also keeps Orca cards in sync.
+  - The orchestrator reads only first lines / single sections, never whole agent files.
+  - Skill frontmatter runs the orchestrator on `model: sonnet`, `effort: medium`.
+    **Verified 2026-10-22:** it only holds for the turn `/factory` was typed in; turns
+    triggered by finished background agents run on the session model (Opus in the test).
+    Mitigation: SKILL.md tells the user once to `/model sonnet`. Option to explore:
+    `context: fork` with a Sonnet orchestrator subagent, if forked skills can spawn agents.
+- [x] **Re-review only what's needed.** `F round` re-runs reviewers that said CHANGES plus code;
+  carries PASS forward unless the changes since the last reviewed commit touch front-end files
+  (ux/ui) or risky files (security). Tested on a throwaway repo.
+- [x] **Size and risk routing.** Spec-writer writes `Size:` / `Risk:`; `F route <id> <role>`
+  returns model + effort (table below). `FACTORY_ROUTING=off` falls back to agent defaults.
+- [x] **Quota guard.** `F new` refuses when the 5-hour window has < 15% left (unless `--force`
+  after the user agrees); stale quota data (> 15 min) is ignored. `hello` shows the quota.
 
 ## P2: solid savings
 
-- [ ] **Precompute the diff once per round.** The orchestrator writes `round-N/diff.patch` and
-  `round-N/files.txt`; reviewers read those instead of each running git log/diff (same input
-  for all 4, better cache reuse, fewer tool calls).
-- [ ] **Per-job token budget.** Add a `scripts/usage.js <repo> <job-id>` CLI (reuse serve.js
-  logic). If a job passes its budget (S 400k, M 1M, L 2.5M weighted tokens, tune with data),
-  stop and escalate with "over budget" instead of starting another round.
-- [ ] **Cheaper approver.** When all 4 PASS and no risky path is touched, run the approver on
-  sonnet/low; keep opus for risky diffs. The escalation rules are mostly path-based, so a
-  script can pre-check them and give the approver a short list.
+- [x] **Precompute the diff once per round.** `F round` writes `round-N/diff.patch` and
+  `files.txt`; reviewers and the approver read them.
+- [x] **Per-job token budget.** `F cost <id>` (shared `scripts/lib/usage.js`); the orchestrator
+  stops with "over token budget" before starting another round (S 400k, M 1M, L 2.5M weighted).
+- [x] **Cheaper approver.** Routed by size/risk (sonnet/low for S); `F round` passes the risky
+  paths so the approver checks those first; the merge-tree check is done by `F conflict`.
 - [ ] **Fast lane for size S, risk low** (copy change, small UI tweak, config value): skip the
   spec-writer (the builder writes a 10-line mini-spec at the top of build.md), and run only
   code + one merged "ux/ui" reviewer on sonnet/low. Human test gate unchanged.
-- [ ] **Builder context hygiene.** On resume, point the builder only at the CHANGES findings,
-  not every review file; tell it not to re-read files it already changed unless needed.
+  Blocked on: size is only known after the spec. Option: a cheap haiku pre-classifier.
+- [x] **Builder context hygiene.** Fix rounds spawn a fresh builder told to read build.md and only
+  the CHANGES reviews (no more resumed builders re-reading 600k+ tokens of old context; also lets
+  `F route` raise the effort).
 
 ## P3: measure and tune
 
-- [ ] Record per job in job.json at the end: weighted tokens, rounds, escalated?, human rework?
-- [ ] `/factory bye` adds a "Cost" line to the journal (tokens per job, per role).
+- [x] Record per job in job.json at the end: `F cost <id> --save` at needs-human (weighted tokens,
+  agents, raw tokens). Still missing: rounds-to-pass, escalated?, human rework? as fields.
+- [x] `/factory bye` adds a "Cost" line to the journal.
+- [x] **Run one real end-to-end job on a throwaway repo with the new flow.** (2026-10-22)
+  textkit, "add truncate(text, maxLength) with tests": spec (opus·medium) → build (sonnet·medium)
+  → security + code (sonnet·low; ux/ui skipped, no front end) → approver (sonnet·low) → APPROVE
+  in 1 round → merged. **5 agents, 79k weighted tokens** (output 317, cache read 137k,
+  input+cache write 51k), about 2 minutes of agent time. For comparison, job 001 in fitness-app
+  (larger, UI-heavy, 3 rounds) used 19 agents and ~2.1M cache reads before these changes.
+  Bugs found and fixed during the run: token counting missed agents whose orchestrator session
+  lives in another project folder; the Sonnet frontmatter doesn't survive background turns.
+  Still untested: Orca worktree creation through `F worktree`, a fix round (CHANGES), a base sync.
 - [ ] Weekly: if S-sized jobs often need rework → raise their builder effort; if reviewers on
   low never catch anything the human later finds → keep low; if they miss things → raise.
 - [ ] Try Haiku for the UX/UI reviewers of tiny diffs; compare findings with sonnet on a few jobs.
 
-## Proposed routing table (to validate with data)
+## Routing table (validate with data)
 
 The spec-writer decides **Size** and **Risk** from signals it already sees:
 
@@ -89,18 +98,20 @@ The spec-writer decides **Size** and **Risk** from signals it already sees:
 **Risk: high** if it touches auth, permissions, payments, user input to SQL/shell/HTML,
 file uploads, secrets, migrations, deploy/CI, or sends email. Otherwise low.
 
-| Role | S / low risk | M | L or high risk |
-|---|---|---|---|
-| spec-writer | (skipped, fast lane) | opus · medium | opus · high |
-| builder | sonnet · medium | opus · medium | opus · high |
-| security | sonnet · low | sonnet · medium | opus · high |
-| code | sonnet · low | sonnet · medium | sonnet · high |
-| ux / ui | sonnet · low (merged) | sonnet · low | sonnet · medium |
-| approver | sonnet · low | sonnet · medium | opus · medium |
-| orchestrator | sonnet (session model) | sonnet | sonnet or opus |
+Implemented in `scripts/factory.js` (`TABLE` and `cmds.route`); tune it there:
 
-Escalate the effort automatically on a retry: if a round comes back with CHANGES, the next
-builder run goes one effort step up (low → medium → high), capped by MAX_RESUMES.
+| Role | S | M | L | Risk: high overrides |
+|---|---|---|---|---|
+| spec-writer | opus · medium | opus · medium | opus · medium | (size unknown yet) |
+| builder | sonnet · medium | opus · medium | opus · high | sonnet → opus |
+| security | sonnet · low | sonnet · medium | opus · high | opus · high |
+| code | sonnet · low | sonnet · medium | sonnet · high | |
+| ux / ui | sonnet · low | sonnet · low | sonnet · medium | |
+| approver | sonnet · low | sonnet · medium | opus · medium | opus · medium |
+| orchestrator | sonnet · medium (skill frontmatter) | | | |
+
+Retries: each fix round's builder goes one effort step up (low → medium → high); on the
+second retry a sonnet builder becomes opus.
 
 ## Other improvements (not cost)
 
