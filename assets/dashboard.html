@@ -458,6 +458,7 @@ function card(job, past) {
           ? '<span class="flag" style="color:var(--pass)">ready to test</span>'
           : '<span class="flag">your call</span>') : ''}
         ${rejected ? '<span class="flag" style="color:var(--faint)">rejected</span>' : ''}
+        ${job.stage === 'pr' ? '<span class="flag" style="color:var(--pass)">PR open</span>' : ''}
       </div>
       <p class="feature">${esc(job.feature)}</p>
       <div class="branch">${esc(job.branch)}${job.base ? ` → ${esc(job.base)}` : ''}</div>
@@ -473,7 +474,7 @@ async function render() {
   const byStage = Object.fromEntries(STAGES.map((s) => [s.key, []]))
   const pasts = await Promise.all(jobs.map(pastRounds))
   jobs.forEach((job, i) => {
-    const col = job.stage === 'rejected' ? 'merged' : job.stage
+    const col = job.stage === 'rejected' ? 'merged' : job.stage === 'pr' ? 'needs-human' : job.stage
     if (!byStage[col]) problems.push(`Job ${job.id} has unknown stage "${job.stage}"`)
     else byStage[col].push(card(job, pasts[i]))
   })

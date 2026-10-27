@@ -115,7 +115,19 @@ second retry a sonnet builder becomes opus.
 
 ## Other improvements (not cost)
 
+- [x] **Base = the checked-out branch** (2026-10-27): jobs merge back where they started;
+  `factory.base` still pins one. Detached HEAD is refused.
+- [x] **Env files copied into worktrees** (`factory.copy`, default `.env*`, ignored files only).
+- [x] **Plugin packaging** (`.claude-plugin/`), plus an agents drift check for git installs.
+- [x] **`/factory pr`**, branch name template (`factory.branch`), spec kept in the repo (`factory.specdir`).
+- [x] **`scripts/selftest.js`** (17 checks, no agents or network). Fixed on the way: stale
+  backlog lock, crash on a corrupt quota.json, BOM in verdict files, `set` turning
+  `note=123` into a number, DNS rebinding on the dashboard server.
+- [ ] Shared `node_modules` across worktrees. Not done on purpose: a job's `npm install`
+  would change the main checkout's packages, and parallel builds share `node_modules/.cache`.
+  Revisit with pnpm (hard links) or a lockfile-keyed copy.
 - [ ] Run one full end-to-end job on a throwaway repo after each big change (we have only one real run).
+  Still untested end to end: a real `gh pr create`, Orca worktree creation.
 - [ ] Old agents in job 001 lack the job-id prefix, so the dashboard can't count them; one-off
   backfill by matching descriptions ("Security review round 1") to job folders.
 - [ ] Orca may rewrite the status line setting on update; `/factory hello` should check and offer to re-chain.

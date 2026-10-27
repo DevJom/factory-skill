@@ -1,6 +1,6 @@
 ---
 name: factory
-description: Run the software factory - spec, build, four parallel reviews and an approver, then the human tests and approves before anything merges. Every job gets its own worktree (Orca when running, plain git otherwise), so several features can be built at once. Use when the user types /factory <feature>, /factory "<feature A>" "<feature B>", /factory next [n], /factory status, /factory test|approve|reject <job-id>, /factory rework <job-id> <note>, /factory resume [job-id], /factory dashboard, /factory hello|hi|morning, or /factory bye|goodbye.
+description: Run the software factory - spec, build, four parallel reviews and an approver, then the human tests and approves before anything merges. Every job gets its own worktree (Orca when running, plain git otherwise), so several features can be built at once. Use when the user types /factory <feature>, /factory "<feature A>" "<feature B>", /factory next [n], /factory status, /factory test|approve|reject|pr <job-id>, /factory rework <job-id> <note>, /factory resume [job-id], /factory dashboard, /factory hello|hi|morning, or /factory bye|goodbye.
 model: sonnet
 effort: medium
 ---
@@ -38,14 +38,20 @@ checkout. It does all bookkeeping and prints one line of JSON.
 | several quoted features, or `next <n>` with n > 1 | read `reference/parallel.md` |
 | `next` | `F claim 1`, then **/factory <feature>** with `F new "<item>" --backlog "<item>"`; nothing left → say so |
 | `status` (or nothing) | `F setup`, then `F status`; list needs-human jobs first with their commands |
-| `test`, `approve`, `rework`, `reject` | read `reference/human.md` |
+| `test`, `approve`, `rework`, `reject`, `pr` | read `reference/human.md` |
 | `resume` | read `reference/resume.md` |
 | `hello`, `hi`, `morning`, `bye`, `goodbye` | read `reference/daily.md` |
 | `dashboard` | read `reference/dashboard.md` |
 
 Start every command with `F setup`. If it returns `ok: false`, tell the user its
 `error` and `hint` and stop. Print each of its `notices` (they only appear when
-something changed). Keep its `base` and `browser` for this command.
+something changed; one asks to update stale agents: run the command it gives). Keep
+its `browser` for this command.
+
+Every job branches from, and merges back into, the branch checked out in the main
+checkout when the job starts (`git config factory.base <branch>` pins one instead).
+That branch is the job's `base`; `F new` and `F worktree` return it. Every job gets
+its own branch and worktree, also when several are started at once.
 
 ## The loop
 
@@ -57,6 +63,9 @@ human: /factory test → /factory approve → merge   (the factory never merges 
 ```
 
 ## Spawning agents
+
+Installed as a plugin, the agent types are prefixed: `factory:factory-builder` and so
+on. Use whichever form your list of available agents shows.
 
 | Role | `subagent_type` | Writes |
 |---|---|---|
@@ -73,7 +82,7 @@ For every Agent call:
 
 Every prompt starts with `<paths>`:
 `Job folder: <repo>/.factory/jobs/<id>/. Worktree: <worktree>. Branch: <branch>. Base: <base>.`
-(`worktree` and `branch` come from `F worktree`.) Builder, ux and ui prompts end
+(`worktree`, `branch` and `base` come from `F worktree`.) Builder, ux and ui prompts end
 with ` Port: <port>.` using the ports from `F new` (job number n: builder 5100+10n,
 ux 5101+10n, ui 5102+10n), or ` Browser: none.` when setup says `browser: false`.
 
@@ -81,13 +90,18 @@ ux 5101+10n, ui 5102+10n), or ` Browser: none.` when setup says `browser: false`
 
 1. `F new "<feature, verbatim>"`. If it fails with `low-quota`, tell the user the
    5-hour quota left and when it resets, and ask; only with their yes, rerun with `--force`.
-2. `F worktree <id>`. Mention a `fallback` if present. Then run the project's
+2. `F worktree <id>`. Mention a `fallback` if present. It copies the main checkout's
+   git-ignored env files (`.env*`, or `git config --add factory.copy <glob>`) into the
+   worktree: say which in one line (`envCopied`); warn about any in `envNotIgnored`
+   (not copied, because the worktree would not ignore them). Then run the project's
    fresh-checkout setup inside the worktree (for example `npm install`; take it
    from AGENTS.md/CLAUDE.md or the lockfile). If it fails:
    `F set <id> stage=needs-human note="setup failed: <short reason>"` and stop.
 3. **Spec.** Spawn the spec-writer: `<paths> Feature: <feature, verbatim>`.
    When done, `F overlap <id>`. If it lists overlaps, say so in one line
    (in a multi-job session also see the holds in `reference/parallel.md`).
+   Then `F keepspec <id>`: if it returns a `path`, add ` Commit <path> (the spec) with your work.`
+   to every builder prompt of this job.
 4. **Build.** `F set <id> stage=build`, spawn the builder:
    `<paths> Build round 1. Port: <port>.` Then **Build check**.
 
@@ -143,6 +157,7 @@ sections of decision.md, or `## Blocked` of build.md, or the note), and:
 ```
 /factory test <id>                 run it and try it yourself
 /factory approve <id>              merge it into <base>
+/factory pr <id>                   push it and open a pull request into <base> instead
 /factory rework <id> "<feedback>"  send it back to the builder
 /factory reject <id>               drop it
 ```
@@ -155,10 +170,10 @@ sections of decision.md, or `## Blocked` of build.md, or the note), and:
                             round-N/{review-*.md, diff.patch, files.txt}, decision.md
 ```
 
-job.json `stage`: spec, build, review, approve, needs-human, merged, rejected.
+job.json `stage`: spec, build, review, approve, needs-human, pr, merged, rejected.
 
 ## Safety
 
-Never push. Never force anything (`--force`, `-D`, `reset --hard`), never rebase
+Never push, except `/factory pr` after the user confirms. Never force anything (`--force`, `-D`, `reset --hard`), never rebase
 or rewrite history, never `git add -A`. Touch the main checkout only in the merge
 (`reference/human.md`). Never start Orca if it isn't running.

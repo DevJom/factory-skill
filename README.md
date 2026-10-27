@@ -4,7 +4,7 @@ A software factory for Claude Code, maintained by **DevJom**.
 
 Type `/factory <feature>` and a team of AI agents writes a spec, builds the feature
 in its own worktree, reviews it from four angles (security, UX, UI, code), and
-hands it to you to test. **Nothing reaches your main branch until you approve it.**
+hands it to you to test. **Nothing reaches your branch until you approve it.**
 
 ![Factory dashboard: jobs moving from spec to build, review, and waiting for you](docs/preview.gif)
 
@@ -52,14 +52,28 @@ myapp-factory/001-dark-mode/   ← job 1 builds here (branch factory/001-dark-mo
 myapp-factory/002-search-bar/  ← job 2 builds here (branch factory/002-search-bar)
 ```
 
+Every job branches from **the branch you have checked out when you start it** (say
+`dev`) and merges back into that same branch. Your git-ignored env files (`.env*`)
+are copied into each new worktree, so its dev server, build and tests work.
+
 If Orca is running, the worktrees are created through
 Orca instead and each job shows up as a card in Orca's sidebar with live status.
 
 ## Install
 
 Requires [Claude Code](https://claude.com/claude-code), git and Node.js.
-Optional: Orca, and [`agent-browser`](https://github.com/vercel-labs/agent-browser)
-(lets the builder and UX/UI reviewers look at your running app).
+Optional: Orca, [`agent-browser`](https://github.com/vercel-labs/agent-browser)
+(lets the builder and UX/UI reviewers look at your running app), and the GitHub CLI
+`gh` for `/factory pr`.
+
+**As a plugin (recommended: skill and agents update together)**
+
+```
+/plugin install factory --marketplace DevJom/factory-skill
+```
+
+**Or with git**: after a `git pull`, `/factory` tells you when the agents need
+copying again (`node ~/.claude/skills/factory/scripts/factory.js agents`).
 
 **macOS / Linux**
 
@@ -280,13 +294,32 @@ UX and UI reviews are skipped automatically: only security and code review run.
 </details>
 
 <details>
-<summary><b>11. Your main branch isn't <code>main</code></b></summary>
+<summary><b>11. Settings (per repo, all optional)</b></summary>
 
 ```bash
-git config factory.base develop
+git config factory.base develop                 # always use develop, whatever is checked out
+git config factory.branch "feat/{id}"           # branch names; {id}, {n}, {slug} (default factory/{id})
+git config --add factory.copy ".env*"           # files to copy into worktrees (default .env*)
+git config --add factory.copy "apps/web/.env*"  #   add one line per path or glob
+git config factory.specdir docs/plan/feature    # commit each spec into the repo as <dir>/<id>.md
+git config factory.remote upstream              # remote for /factory pr (default origin)
 ```
 
-Jobs branch from `develop` and merge back into it.
+Only git-ignored files are copied, so a copied secret can never be committed on the
+job branch. Orca worktrees keep Orca's own branch names.
+</details>
+
+<details>
+<summary><b>11b. Your team merges through pull requests</b></summary>
+
+```
+/factory pr 001-back-to-top
+```
+
+Instead of a local merge: it asks you to confirm, pushes the branch and opens a PR into
+the job's base with the summary, acceptance criteria and the factory's decision. Review
+comments go back with `/factory rework`, and another `/factory pr` pushes the fix to the
+same PR. Once it's merged on GitHub, `/factory approve` removes the worktree.
 </details>
 
 <details>
@@ -305,7 +338,7 @@ re-running only the reviewers that hadn't finished). `/factory hello` also lists
 
 | Message | What to do |
 |---|---|
-| main checkout is busy or not on main | Switch your project folder to main and commit or stash your own work |
+| main checkout is busy or not on the base branch | Switch your project folder to the job's base branch and commit or stash your own work |
 | worktree has uncommitted edits | You edited files while testing: commit them in the job's worktree, or discard them |
 | conflicts with main | `/factory rework <id> "merge main and resolve the conflicts"` |
 | worktree removal failed | The merge already happened. Close the editor or dev server using that folder, then remove it |
@@ -337,7 +370,8 @@ Link straight to a job with `dashboard.html#<job-id>` or `#<job-id>/__agents`.
 /factory next [n]                  build the next item(s) from .factory/backlog.md
 /factory status                    all jobs at a glance (also: /factory with no arguments)
 /factory test <job-id>             run a finished job and try it
-/factory approve <job-id>          merge it into your base branch (never pushes)
+/factory approve <job-id>          merge it into the branch it started from (never pushes)
+/factory pr <job-id>               push it and open a pull request instead
 /factory rework <job-id> "<note>"  send it back with your feedback
 /factory reject <job-id>           drop it
 /factory resume [job-id]           continue a job whose session closed
@@ -386,6 +420,8 @@ scripts/factory.js       bookkeeping helper (jobs, worktrees, rounds, routing, q
 scripts/lib/usage.js     token counting from Claude Code's transcripts
 scripts/serve.js         dashboard server with quota and token APIs
 scripts/statusline.js    status line that records plan quota (can chain an existing one)
+scripts/selftest.js      self-test of factory.js in a throwaway repo: node scripts/selftest.js
+.claude-plugin/          plugin and marketplace manifests
 docs/                    screenshots
 TODO.md                  improvement backlog
 ```
