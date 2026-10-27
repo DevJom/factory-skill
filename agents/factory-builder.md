@@ -1,6 +1,6 @@
 ---
 name: factory-builder
-description: Factory step 2. Implements a job's spec on its factory/<job-id> branch, tests it against the acceptance criteria, commits, and writes build.md. Resumed after each review round or base sync. Spawned by the /factory skill.
+description: Factory step 2. Implements a job's spec on the job's own branch, tests it against the acceptance criteria, commits, and writes build.md. Resumed after each review round or base sync. Spawned by the /factory skill.
 tools: Read, Grep, Glob, Bash, Edit, Write
 model: opus
 ---

@@ -1,0 +1,8 @@
+{
+  "name": "factory",
+  "description": "Software factory: spec, build, four parallel reviews and an approver in per-job worktrees; the human tests and approves before anything merges.",
+  "author": { "name": "DevJom" },
+  "repository": "https://github.com/DevJom/factory-skill",
+  "license": "MIT",
+  "keywords": ["workflow", "agents", "worktree", "review"]
+}

@@ -5,7 +5,10 @@
 //
 //   setup                         prepare .factory/, detect base, Orca, browser, quota
 //   new "<feature>" [--backlog "<item>"] [--force]   claim a job id (quota guard)
-//   worktree <id>                 create the job's worktree (Orca or git)
+//   worktree <id>                 create (or re-create) the job's worktree, copy env files
+//   keepspec <id>                 copy spec.md into the worktree (git config factory.specdir)
+//   pr <id>                       push the branch and open (or update) a GitHub PR
+//   agents                        copy the skill's agents into ~/.claude/agents
 //   set <id> key=value ...        update job.json (dotted keys ok) + Orca card
 //   agent <id> <role> <round> <agent-id>   record a spawned agent
 //   overlap <id>                  compare "Files likely touched" with active jobs
@@ -37,7 +40,7 @@ const now = () => new Date().toISOString()
 const out = (o) => { process.stdout.write(JSON.stringify(o) + '\n') }
 const fail = (error, extra = {}) => { out({ ok: false, error, ...extra }); process.exit(1) }
 const read = (f) => { try { return fs.readFileSync(f, 'utf8') } catch { return null } }
-const firstLine = (f) => { const t = read(f); return t === null ? null : t.replace(/\r/g, '').split('\n')[0].trim() }
+const firstLine = (f) => { const t = read(f); return t === null ? null : t.replace(/^﻿/, '').replace(/\r/g, '').split('\n')[0].trim() }
 
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, timeout: 60000, ...opts })
@@ -52,7 +55,7 @@ function repoRoot() {
   if (r.code !== 0) fail('not-a-git-repo', { hint: 'run git init and make a first commit' })
   return posix(r.out)
 }
-const REPO = ['setup', 'new', 'worktree', 'set', 'agent', 'overlap', 'route', 'round', 'verdicts', 'build', 'decision', 'conflict', 'cost', 'claim', 'status'].includes(process.argv[2]) ? repoRoot() : null
+const REPO = ['setup', 'new', 'worktree', 'keepspec', 'pr', 'set', 'agent', 'overlap', 'route', 'round', 'verdicts', 'build', 'decision', 'conflict', 'cost', 'claim', 'status'].includes(process.argv[2]) ? repoRoot() : null
 const FDIR = REPO && `${REPO}/.factory`
 const stateFile = () => `${FDIR}/state.json`
 const loadState = () => { try { return JSON.parse(read(stateFile())) || {} } catch { return {} } }
@@ -71,9 +74,9 @@ function saveJob(job) {
 // ---- Quota ------------------------------------------------------------------
 
 function quota() {
-  const t = read(path.join(os.homedir(), '.claude', 'factory', 'quota.json'))
-  if (!t) return { available: false }
-  const q = JSON.parse(t)
+  let q
+  try { q = JSON.parse(read(path.join(os.homedir(), '.claude', 'factory', 'quota.json'))) } catch { q = null }
+  if (!q) return { available: false }
   const s = Date.now() / 1000
   const left = (w) => (w && w.used_percentage != null && !(w.resets_at && w.resets_at < s)) ? Math.max(0, Math.round(100 - w.used_percentage)) : null
   return {
@@ -163,8 +166,7 @@ cmds.setup = () => {
     fs.mkdirSync(path.dirname(exclude), { recursive: true })
     fs.appendFileSync(exclude, (ex && !ex.endsWith('\n') ? '\n' : '') + '.factory/\n')
   }
-  const hasBranch = (b) => git(['show-ref', '--verify', '--quiet', `refs/heads/${b}`], REPO).code === 0
-  const base = git(['config', 'factory.base'], REPO).out || (hasBranch('main') && 'main') || (hasBranch('master') && 'master') || git(['branch', '--show-current'], REPO).out
+  const base = currentBase()
   const claudeMd = fs.existsSync(`${REPO}/AGENTS.md`) || fs.existsSync(`${REPO}/CLAUDE.md`)
   const browser = run(process.platform === 'win32' ? 'where' : 'which', ['agent-browser']).code === 0
   const o = detectOrca()
@@ -176,8 +178,35 @@ cmds.setup = () => {
   if (o.added) notices.push('added this repo to Orca')
   if (!claudeMd && prev.claudeMd !== false) notices.push('no AGENTS.md/CLAUDE.md: agents will discover commands themselves; run /init first for better, cheaper jobs')
   if (!browser && prev.browser !== false) notices.push('agent-browser not installed: no in-browser checks')
+  const stale = staleAgents()
+  if (stale.length) notices.push(`agents in ~/.claude/agents are missing or out of date (${stale.join(', ')}): run node "${posix(__filename)}" agents, then start a new session`)
   saveState({ ...prev, base, mode: o.mode, exe: o.exe || null, repoId: o.repoId || null, claudeMd, browser })
   out({ ok: true, repo: REPO, base, mode: o.mode, browser, claudeMd, created, notices, quota: quota() })
+}
+
+// Jobs branch from, and merge back into, the branch checked out when they start
+// (unless git config factory.base pins one).
+function currentBase() {
+  const b = git(['config', 'factory.base'], REPO).out || git(['branch', '--show-current'], REPO).out
+  if (!b) fail('detached-head', { hint: 'check out the branch the features should merge into' })
+  return b
+}
+
+// A plugin install loads agents/ itself; a git-clone install needs copies in ~/.claude/agents.
+const AGENTS_SRC = path.join(SKILL_DIR, 'agents')
+const AGENTS_DST = path.join(os.homedir(), '.claude', 'agents')
+const isPlugin = () => norm(SKILL_DIR).includes('/.claude/plugins/')
+function staleAgents() {
+  if (isPlugin()) return []
+  let names = []
+  try { names = fs.readdirSync(AGENTS_SRC).filter((f) => f.endsWith('.md')) } catch { return [] }
+  return names.filter((f) => read(path.join(AGENTS_SRC, f)) !== read(path.join(AGENTS_DST, f))).map((f) => f.replace(/\.md$/, ''))
+}
+cmds.agents = () => {
+  fs.mkdirSync(AGENTS_DST, { recursive: true })
+  const copied = staleAgents()
+  for (const a of copied) fs.copyFileSync(path.join(AGENTS_SRC, `${a}.md`), path.join(AGENTS_DST, `${a}.md`))
+  out({ ok: true, copied, restart: copied.length > 0 })
 }
 
 function slugify(feature) {
@@ -194,7 +223,7 @@ cmds.new = (args) => {
   if (!flags.force && q.available && !q.stale && q.fiveHourLeft != null && q.fiveHourLeft < QUOTA_MIN_LEFT) {
     fail('low-quota', { fiveHourLeft: q.fiveHourLeft, resetsAt: q.resetsAt, hint: 'wait for the reset or pass --force' })
   }
-  const st = loadState()
+  const base = currentBase()
   const slug = flags.slug || slugify(feature)
   let n = Math.max(0, ...fs.readdirSync(`${FDIR}/jobs`).map((d) => parseInt(d, 10)).filter((x) => !isNaN(x))) + 1
   let id
@@ -203,23 +232,63 @@ cmds.new = (args) => {
     try { fs.mkdirSync(jobDir(id)); break } catch (e) { if (e.code !== 'EEXIST') throw e }
   }
   const job = {
-    id, feature, branch: '', base: st.base || 'main', worktree: '', orca: '', dev_terminal: '',
+    id, feature, branch: '', base, worktree: '', orca: '', dev_terminal: '',
     stage: 'spec', round: 0, resumes: 0, reviews: Object.fromEntries(REVIEWERS.map((k) => [k, 'pending'])),
     surface: '', size: '', risk: '', builder: '', overlaps: [], agents: [], reviewed: {}, note: '',
     started: now(), updated: now(),
   }
   saveJob(job)
   if (flags.backlog) linkBacklog(flags.backlog, id)
-  out({ ok: true, id, ports: ports(n) })
+  out({ ok: true, id, base, ports: ports(n) })
 }
 
 const ports = (n) => ({ builder: 5100 + 10 * n, ux: 5101 + 10 * n, ui: 5102 + 10 * n, test: 5103 + 10 * n })
+
+// git config factory.branch "feat/{id}" ({id}, {n}, {slug}); Orca names its own branches.
+function branchName(id) {
+  const tpl = git(['config', 'factory.branch'], REPO).out || 'factory/{id}'
+  const name = tpl.replace(/\{id\}/g, id).replace(/\{n\}/g, id.split('-')[0]).replace(/\{slug\}/g, id.split('-').slice(1).join('-'))
+  if (git(['check-ref-format', '--branch', name], REPO).code !== 0) fail('bad-branch-name', { name, hint: 'fix git config factory.branch' })
+  return name
+}
+
+// Git-ignored files the main checkout has and a fresh worktree lacks (.env and friends).
+// git config --add factory.copy "<path or glob>" replaces the default ".env*".
+function copyEnv(job) {
+  const r = run('git', ['config', '--get-all', 'factory.copy'], { cwd: REPO })
+  const patterns = r.code === 0 && r.out ? r.out.split('\n').map((s) => s.trim()).filter(Boolean) : ['.env*']
+  const copied = [], skipped = []
+  for (const p of patterns) {
+    const dir = path.posix.dirname(posix(p))
+    const re = new RegExp('^' + path.posix.basename(posix(p)).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$')
+    let names = []
+    try { names = fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).filter((d) => d.isFile() && re.test(d.name)).map((d) => d.name) } catch { continue }
+    for (const name of names) {
+      const rel = dir === '.' ? name : `${dir}/${name}`
+      const dst = path.join(job.worktree, rel)
+      if (fs.existsSync(dst)) continue // tracked, or copied before
+      // Only ignored files: a copied secret must never be committable in the job branch.
+      if (git(['check-ignore', '-q', rel], job.worktree).code !== 0) { skipped.push(rel); continue }
+      fs.mkdirSync(path.dirname(dst), { recursive: true })
+      fs.copyFileSync(path.join(REPO, rel), dst)
+      copied.push(rel)
+    }
+  }
+  return { copied, skipped }
+}
 
 cmds.worktree = ([id]) => {
   const job = loadJob(id)
   const st = loadState()
   let fallback = null
-  if (st.mode === 'orca' && st.exe && st.repoId) {
+  if (job.worktree && !fs.existsSync(job.worktree)) job.orca = '' // re-created below as a plain git worktree
+  if (job.worktree && fs.existsSync(job.worktree)) {
+    // already there: nothing to create
+  } else if (job.branch) {
+    git(['worktree', 'prune'], REPO) // forget the deleted folder, or add refuses
+    const r = git(['worktree', 'add', job.worktree, job.branch], REPO)
+    if (r.code !== 0) fail('worktree-failed', { detail: r.err.slice(0, 300) })
+  } else if (st.mode === 'orca' && st.exe && st.repoId) {
     const r = orca(['worktree', 'create', '--repo', `id:${st.repoId}`, '--name', `factory-${id}`, '--no-parent', '--base-branch', job.base, '--comment', `${id}: writing spec`], st.exe)
     const wt = r.ok && findDeep(r.json, (o) => o && typeof o.id === 'string' && o.id.includes('::'))
     if (wt) {
@@ -230,13 +299,58 @@ cmds.worktree = ([id]) => {
   }
   if (!job.worktree) {
     const wt = `${posix(path.dirname(REPO))}/${path.basename(REPO)}-factory/${id}`
-    const r = git(['worktree', 'add', '-b', `factory/${id}`, wt, job.base], REPO)
+    const branch = branchName(id)
+    const r = git(['worktree', 'add', '-b', branch, wt, job.base], REPO)
     if (r.code !== 0) fail('worktree-failed', { detail: r.err.slice(0, 300) })
     job.worktree = wt
-    job.branch = `factory/${id}`
+    job.branch = branch
   }
   saveJob(job)
-  out({ ok: true, worktree: job.worktree, branch: job.branch, orca: !!job.orca, fallback })
+  const env = copyEnv(job)
+  out({ ok: true, worktree: job.worktree, branch: job.branch, base: job.base, orca: !!job.orca, fallback, envCopied: env.copied, envNotIgnored: env.skipped })
+}
+
+// git config factory.specdir docs/plan/feature: keep the spec in the repo after merge.
+cmds.keepspec = ([id]) => {
+  const job = loadJob(id)
+  const dir = git(['config', 'factory.specdir'], REPO).out
+  if (!dir) return out({ ok: true, path: null })
+  const rel = `${posix(dir).replace(/\/+$/, '')}/${id}.md`
+  fs.mkdirSync(path.dirname(path.join(job.worktree, rel)), { recursive: true })
+  fs.copyFileSync(`${jobDir(id)}/spec.md`, path.join(job.worktree, rel))
+  out({ ok: true, path: rel })
+}
+
+// Push the branch and open a PR into the job's base. The orchestrator asks the
+// human first; this is the only command that talks to a remote.
+cmds.pr = ([id]) => {
+  const job = loadJob(id)
+  if (job.stage !== 'needs-human' && job.stage !== 'pr') fail('wrong-stage', { stage: job.stage })
+  if (git(['status', '--porcelain'], job.worktree).out) fail('worktree-dirty', { hint: 'commit or discard the edits in the worktree first' })
+  const remote = git(['config', 'factory.remote'], REPO).out || 'origin'
+  const push = git(['push', '-u', remote, job.branch], REPO)
+  if (push.code !== 0) fail('push-failed', { detail: push.err.slice(0, 300) })
+  if (!job.pr) {
+    const spec = read(`${jobDir(id)}/spec.md`) || ''
+    const title = ((spec.match(/^#\s+(.+)$/m) || [])[1] || job.feature).trim()
+    const section = (f, h) => { const m = (read(f) || '').replace(/\r/g, '').match(new RegExp(`^## ${h}\\n([\\s\\S]*?)(?=^## |$(?![\\s\\S]))`, 'm')); return m ? m[1].trim() : '' }
+    const body = [
+      `> ${job.feature}`,
+      '## Summary', section(`${jobDir(id)}/build.md`, 'Summary'),
+      '## Acceptance criteria', section(`${jobDir(id)}/build.md`, 'Acceptance criteria'),
+      '## Factory decision', `${firstLine(`${jobDir(id)}/decision.md`) || 'none'}: ${section(`${jobDir(id)}/decision.md`, 'Why')}`,
+    ].join('\n\n')
+    const bodyFile = `${jobDir(id)}/pr-body.md`
+    fs.writeFileSync(bodyFile, body + '\n')
+    const r = run('gh', ['pr', 'create', '--base', job.base, '--head', job.branch, '--title', title, '--body-file', bodyFile], { cwd: REPO })
+    if (r.code !== 0) fail('gh-pr-failed', { detail: (r.err || r.out).slice(0, 300), hint: 'is gh installed and logged in (gh auth status)? does the base branch exist on the remote?' })
+    job.pr = r.out.split('\n').pop().trim()
+  }
+  job.stage = 'pr'
+  job.note = `PR open: ${job.pr}`
+  saveJob(job)
+  syncCard(job)
+  out({ ok: true, pr: job.pr })
 }
 
 cmds.set = (args) => {
@@ -248,11 +362,13 @@ cmds.set = (args) => {
     if (i < 1) fail(`bad pair: ${p}`)
     const key = p.slice(0, i)
     let val = p.slice(i + 1)
-    try { val = JSON.parse(val) } catch { /* plain string */ }
-    if (key === 'comment') { comment = String(val); continue }
+    if (key === 'comment') { comment = val; continue }
     const parts = key.split('.')
     let o = job
     for (const k of parts.slice(0, -1)) o = o[k] = o[k] && typeof o[k] === 'object' ? o[k] : {}
+    // String fields (note, stage, ...) stay strings, so note=123 isn't stored as a number.
+    if (typeof o[parts.at(-1)] !== 'string') { try { val = JSON.parse(val) } catch { /* plain string */ } }
+    else if (val === '""') val = ''
     o[parts.at(-1)] = val
   }
   saveJob(job)
@@ -439,7 +555,9 @@ cmds.claim = ([n]) => {
   const lock = `${FDIR}/backlog.lock`
   for (let i = 0; ; i++) {
     try { fs.mkdirSync(lock); break } catch {
-      if (i > 50) fail('backlog-locked')
+      // A lock older than a minute was left by a crashed session; take it over once.
+      try { if (i === 0 && Date.now() - fs.statSync(lock).mtimeMs > 60e3) { fs.rmdirSync(lock); continue } } catch { /* gone already */ }
+      if (i > 50) fail('backlog-locked', { hint: `remove ${lock} if no other session is claiming` })
       const t = Date.now(); while (Date.now() - t < 100) { /* wait */ }
     }
   }
@@ -470,7 +588,7 @@ cmds.status = () => {
     if (!t) continue
     const j = JSON.parse(t)
     const rv = REVIEWERS.map((k) => `${k === 'security' ? 'sec' : k}:${({ PASS: '✓', CHANGES: '✗', pending: '·' })[j.reviews[k]] || '?'}`).join(' ')
-    rows.push({ order: j.stage === 'needs-human' ? 0 : ACTIVE.has(j.stage) ? 1 : 2, line: `${id.padEnd(28)} ${j.stage.padEnd(11)} r${j.round} ${rv}  ${j.note || ''}` })
+    rows.push({ order: j.stage === 'needs-human' || j.stage === 'pr' ? 0 : ACTIVE.has(j.stage) ? 1 : 2, line: `${id.padEnd(28)} ${j.stage.padEnd(11)} r${j.round} ${rv}  ${j.note || ''}` })
   }
   rows.sort((a, b) => a.order - b.order)
   process.stdout.write((rows.map((r) => r.line).join('\n') || 'no jobs yet') + '\n')
@@ -491,7 +609,7 @@ function parseFlags(args) {
 
 const [cmd, ...rest] = process.argv.slice(2)
 if (!cmds[cmd]) {
-  process.stdout.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 20).map((l) => l.replace(/^\/\/ ?/, '')).join('\n') + '\n')
+  process.stdout.write(fs.readFileSync(__filename, 'utf8').split('\n').slice(2, 23).map((l) => l.replace(/^\/\/ ?/, '')).join('\n') + '\n')
   process.exit(cmd ? 1 : 0)
 }
 cmds[cmd](rest)

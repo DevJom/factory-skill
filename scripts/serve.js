@@ -37,6 +37,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 
 http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost')
+  // Block DNS rebinding: a web page that resolves its own name to 127.0.0.1 sends its own Host.
+  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(req.headers.host || '')) return send(res, 403, 'Forbidden', 'text/plain')
   try {
     if (url.pathname === '/api/usage') return send(res, 200, JSON.stringify(collectUsage(root)), TYPES['.json'])
     if (url.pathname === '/api/quota') return send(res, 200, JSON.stringify(quota()), TYPES['.json'])

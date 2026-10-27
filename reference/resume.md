@@ -15,4 +15,5 @@ Continue from the job's stage, using the steps in SKILL.md:
 - **review**: `F verdicts <id>`; spawn only the reviewers listed in `missing`
   (in one message), then continue the Review round.
 - **approve**: `F decision <id>` is APPROVE/ESCALATE → act on it; otherwise spawn the approver.
-- **needs-human, merged, rejected**: nothing to resume; say what the job waits for.
+- Worktree folder gone (any stage)? `F worktree <id>` re-creates it from the branch.
+- **needs-human, pr, merged, rejected**: nothing to resume; say what the job waits for.

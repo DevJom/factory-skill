@@ -1,4 +1,4 @@
-# Human commands: test, approve, rework, reject
+# Human commands: test, approve, pr, rework, reject
 
 `F` = `node <skill folder>/scripts/factory.js`. `<orca>` = the `exe` in
 `<repo>/.factory/state.json` (only used when the job's `orca` field is set).
@@ -23,7 +23,13 @@ The job must have a worktree.
 
 ## /factory approve <id>
 
-The job must be in `needs-human`. If `F decision <id>` is `ESCALATE` or `F build <id>`
+Job in `pr` (its PR was opened with `/factory pr`): `gh pr view <pr> --json state -q .state`
+must print `MERGED`; otherwise say the PR is still open and stop. If merged, stop the
+dev server (step 1), remove the worktree (below), `git branch -d <branch>` (keep it if
+that refuses and say so), `F set <id> stage=merged note=""`. Remind the user to pull
+`<base>`. Nothing is merged locally.
+
+Otherwise the job must be in `needs-human`. If `F decision <id>` is `ESCALATE` or `F build <id>`
 is `BLOCKED`, confirm with the user first. Then merge, one merge at a time:
 
 1. **Dev server.** If `dev_terminal` is set: `<orca> terminal close --terminal <handle> --json`
@@ -47,12 +53,31 @@ is `BLOCKED`, confirm with the user first. Then merge, one merge at a time:
 
 Never push. Tell the user the merge is local and they push when ready.
 
+## /factory pr <id>
+
+For teams that merge through pull requests and CI instead of a local merge. The job
+must be in `needs-human` (or `pr`, to push later commits to the same PR). If
+`F decision <id>` is `ESCALATE` or `F build <id>` is `BLOCKED`, say so. Always ask
+the user to confirm before pushing: name the branch, the remote and the base.
+
+1. Stop the dev server (approve step 1).
+2. `F pr <id>`: pushes the branch (`git config factory.remote`, default `origin`) and
+   runs `gh pr create` into the job's base, with the spec title, the build summary,
+   the acceptance criteria and the factory decision as the body. A job that already
+   has a PR only gets the push.
+3. Tell the user the PR URL. The worktree stays, so `/factory rework <id> "<review
+   comments>"` and another `/factory pr <id>` update the same PR. Once it is merged on
+   the remote, `/factory approve <id>` cleans up.
+
+Errors: `push-failed` or `gh-pr-failed` → show `detail` and `hint`. A missing base
+branch on the remote is the usual cause: the user pushes it first.
+
 ## /factory rework <id> <note>
 
-The job must be in `needs-human`.
+The job must be in `needs-human` or `pr`.
 
 1. Write the note verbatim to `<repo>/.factory/jobs/<id>/rework-<k>.md` (next unused k).
-2. Worktree gone? `git worktree add <worktree> <branch>` and `F set <id> orca=""`.
+2. `F worktree <id>`: re-creates the worktree if it is gone and copies the env files again.
 3. `F set <id> stage=build resumes=0 note=""`.
 4. Spawn a fresh builder (as in SKILL.md, `F route <id> build`):
    `<paths> Rework: read rework-<k>.md and build.md, address the note, commit, then update build.md for round <round+1>. Port: <port>.`
@@ -60,7 +85,7 @@ The job must be in `needs-human`.
 
 ## /factory reject <id>
 
-The job must be in `needs-human`. Ask the user to confirm. Stop the dev server as
+The job must be in `needs-human` or `pr` (closing the PR is up to the user). Ask the user to confirm. Stop the dev server as
 in approve step 1, remove the worktree (below), `F set <id> stage=rejected`. The
 branch is kept; tell the user `git branch -D <branch>` deletes it.
 

@@ -1,0 +1,12 @@
+{
+  "name": "devjom",
+  "owner": { "name": "DevJom" },
+  "description": "DevJom's Claude Code plugins",
+  "plugins": [
+    {
+      "name": "factory",
+      "source": "./",
+      "description": "Software factory: spec, build, four parallel reviews and an approver in per-job worktrees."
+    }
+  ]
+}
